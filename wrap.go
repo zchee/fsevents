@@ -1,6 +1,10 @@
-// +build darwin
+//go:build darwin && !ios
+// +build darwin,!ios
 
 package fsevents
+
+//go:cgo_ldflag "-framework"
+//go:cgo_ldflag "CoreServices"
 
 /*
 #cgo LDFLAGS: -framework CoreServices
@@ -34,9 +38,35 @@ import (
 	"unsafe"
 )
 
+// funcPC returns the entry point for f. See comments in runtime/proc.go
+// for the function of the same name.
+//go:nosplit
+func funcPC(f func()) uintptr {
+	return **(**uintptr)(unsafe.Pointer(&f))
+}
+
+// libcCall call fn with arg as its argument. Return what fn returns.
+// fn is the raw pc value of the entry point of the desired function.
+// Switches to the system stack, if not already there.
+// Preserves the calling point as the location where a profiler traceback will begin.
+//go:linkname libcCall runtime.libcCall
+//go:nosplit
+func libcCall(fn, arg unsafe.Pointer) int32
+
+// FSEventStreamEventId event IDs that can be passed to the FSEventStreamCreate() functions and
+// FSEventStreamCallback().
+//
+// They are monotonically increasing per system, even across reboots and drives coming and
+// going. They bear no relation to any particular clock or timebase.
+type FSEventStreamEventID uint64
+
+//go:cgo_import_dynamic FSEventsGetCurrentEventId FSEventsGetCurrentEventId "/System/Library/Frameworks/CoreServices.framework/Frameworks/FSEvents.framework/Versions/A/FSEvents"
+
+func fsEventsGetCurrentEventID_trampoline()
+
 // LatestEventID returns the most recently generated event ID, system-wide.
-func LatestEventID() uint64 {
-	return uint64(C.FSEventsGetCurrentEventId())
+func LatestEventID() FSEventStreamEventID {
+	return FSEventStreamEventID(libcCall(unsafe.Pointer(funcPC(fsEventsGetCurrentEventID_trampoline)), nil))
 }
 
 // arguments are released by C at the end of the callback. Ensure copies
@@ -70,11 +100,15 @@ func fsevtCallback(stream C.FSEventStreamRef, info uintptr, numEvents C.size_t, 
 }
 
 // FSEventStreamRef wraps C.FSEventStreamRef
-type FSEventStreamRef C.FSEventStreamRef
+// type FSEventStreamRef C.FSEventStreamRef
+
+//go:cgo_import_dynamic FSEventsGetCurrentEventId FSEventsGetCurrentEventId "/System/Library/Frameworks/CoreServices.framework/Frameworks/FSEvents.framework/Versions/A/FSEvents"
+
+func fsEventStreamGetLatestEventID_trampoline()
 
 // GetStreamRefEventID retrieves the last EventID from the ref
 func GetStreamRefEventID(f FSEventStreamRef) uint64 {
-	return uint64(C.FSEventStreamGetLatestEventId(f))
+	return uint64(fsEventStreamGetLatestEventID_trampoline(f))
 }
 
 // GetStreamRefDeviceID retrieves the device ID the stream is watching
